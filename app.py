@@ -209,8 +209,6 @@ def tela_login():
                     else:
                         sucesso, mensagem = criar_usuario(nome_usuario_novo, senha_nova, nome_completo)
                         if sucesso:
-                            if meta_inicial > 0:
-                                definir_meta_diaria(nome_usuario_novo, meta_inicial)
                             st.success(mensagem)
                             st.balloons()
                         else:

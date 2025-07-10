@@ -1,13 +1,15 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 import plotly.express as px
+import plotly.graph_objects as go
 import hashlib
 import os
 import json
 
 # Arquivos de dados
 ARQUIVO_USUARIOS = "usuarios.json"
+ARQUIVO_LOGIN_SALVO = "login_salvo.json"
 PASTA_DADOS = "dados_usuarios"
 
 def hash_senha(senha):
@@ -27,6 +29,23 @@ def salvar_usuarios(usuarios):
     with open(ARQUIVO_USUARIOS, 'w', encoding='utf-8') as f:
         json.dump(usuarios, f, ensure_ascii=False, indent=2)
 
+def carregar_login_salvo():
+    """Carrega dados do último login salvo"""
+    try:
+        with open(ARQUIVO_LOGIN_SALVO, 'r', encoding='utf-8') as f:
+            return json.load(f)
+    except FileNotFoundError:
+        return {"usuario": "", "lembrar": False}
+
+def salvar_login(nome_usuario, lembrar):
+    """Salva dados de login se solicitado"""
+    dados_login = {
+        "usuario": nome_usuario if lembrar else "",
+        "lembrar": lembrar
+    }
+    with open(ARQUIVO_LOGIN_SALVO, 'w', encoding='utf-8') as f:
+        json.dump(dados_login, f, ensure_ascii=False, indent=2)
+
 def criar_usuario(nome_usuario, senha, nome_completo):
     """Cria novo usuário"""
     usuarios = carregar_usuarios()
@@ -37,7 +56,8 @@ def criar_usuario(nome_usuario, senha, nome_completo):
     usuarios[nome_usuario] = {
         "senha": hash_senha(senha),
         "nome_completo": nome_completo,
-        "data_criacao": datetime.now().isoformat()
+        "data_criacao": datetime.now().isoformat(),
+        "meta_diaria": 0.0  # Meta diária padrão
     }
     
     salvar_usuarios(usuarios)
@@ -59,6 +79,22 @@ def verificar_login(nome_usuario, senha):
         return False, "Senha incorreta!"
     
     return True, "Login realizado com sucesso!"
+
+def get_meta_diaria(nome_usuario):
+    """Retorna a meta diária do usuário"""
+    usuarios = carregar_usuarios()
+    if nome_usuario in usuarios:
+        return usuarios[nome_usuario].get("meta_diaria", 0.0)
+    return 0.0
+
+def definir_meta_diaria(nome_usuario, meta):
+    """Define a meta diária do usuário"""
+    usuarios = carregar_usuarios()
+    if nome_usuario in usuarios:
+        usuarios[nome_usuario]["meta_diaria"] = meta
+        salvar_usuarios(usuarios)
+        return True
+    return False
 
 def get_caminho_dados_usuario(nome_usuario):
     """Retorna caminho do arquivo de dados do usuário"""
@@ -96,9 +132,32 @@ def salvar_dados_usuario(nome_usuario, df):
         st.warning("⚠️ Dados inválidos ou vazios — nada foi salvo.")
         return False
 
+def calcular_progresso_meta(df, meta_diaria):
+    """Calcula o progresso da meta diária"""
+    if df.empty or meta_diaria <= 0:
+        return {}
+    
+    hoje = date.today()
+    df_hoje = df[df["Data"].dt.date == hoje]
+    total_hoje = df_hoje["Valor"].sum() if not df_hoje.empty else 0
+    
+    progresso = (total_hoje / meta_diaria) * 100
+    falta = meta_diaria - total_hoje
+    
+    return {
+        "total_hoje": total_hoje,
+        "meta_diaria": meta_diaria,
+        "progresso": progresso,
+        "falta": falta,
+        "atingida": total_hoje >= meta_diaria
+    }
+
 def tela_login():
     """Tela de login e cadastro"""
     st.title("🔐 Sistema de Controle de Rendimentos")
+    
+    # Carregar dados de login salvos
+    login_salvo = carregar_login_salvo()
     
     tab1, tab2 = st.tabs(["Login", "Cadastro"])
     
@@ -106,14 +165,18 @@ def tela_login():
         st.subheader("Fazer Login")
         
         with st.form("form_login"):
-            nome_usuario = st.text_input("Nome de usuário")
+            nome_usuario = st.text_input("Nome de usuário", value=login_salvo["usuario"])
             senha = st.text_input("Senha", type="password")
+            lembrar_login = st.checkbox("Lembrar usuário", value=login_salvo["lembrar"])
             botao_login = st.form_submit_button("Entrar")
             
             if botao_login:
                 if nome_usuario and senha:
                     sucesso, mensagem = verificar_login(nome_usuario, senha)
                     if sucesso:
+                        # Salvar login se solicitado
+                        salvar_login(nome_usuario, lembrar_login)
+                        
                         st.session_state.logado = True
                         st.session_state.usuario_atual = nome_usuario
                         usuarios = carregar_usuarios()
@@ -133,6 +196,7 @@ def tela_login():
             nome_completo = st.text_input("Nome completo")
             senha_nova = st.text_input("Senha", type="password")
             confirmar_senha = st.text_input("Confirmar senha", type="password")
+            meta_inicial = st.number_input("Meta diária inicial (R$)", min_value=0.0, value=0.0, format="%.2f")
             botao_cadastro = st.form_submit_button("Criar conta")
             
             if botao_cadastro:
@@ -146,6 +210,8 @@ def tela_login():
                     else:
                         sucesso, mensagem = criar_usuario(nome_usuario_novo, senha_nova, nome_completo)
                         if sucesso:
+                            if meta_inicial > 0:
+                                definir_meta_diaria(nome_usuario_novo, meta_inicial)
                             st.success(mensagem)
                             st.balloons()
                         else:
@@ -168,6 +234,53 @@ def tela_principal():
             st.session_state.usuario_atual = None
             st.session_state.nome_completo = None
             st.rerun()
+
+    # Configurações da Meta Diária
+    st.subheader("🎯 Configurar Meta Diária")
+    meta_atual = get_meta_diaria(st.session_state.usuario_atual)
+    
+    with st.form("form_meta"):
+        nova_meta = st.number_input("Meta diária (R$)", min_value=0.0, value=meta_atual, format="%.2f")
+        if st.form_submit_button("Atualizar Meta"):
+            if definir_meta_diaria(st.session_state.usuario_atual, nova_meta):
+                st.success("✅ Meta diária atualizada com sucesso!")
+                st.rerun()
+
+    # Mostrar progresso da meta diária
+    df = carregar_dados_usuario(st.session_state.usuario_atual)
+    if not df.empty:
+        df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
+        df = df.dropna(subset=["Data"])
+        
+        if nova_meta > 0:
+            progresso_meta = calcular_progresso_meta(df, nova_meta)
+            
+            if progresso_meta:
+                st.subheader(f"🎯 Meta de Hoje: R$ {progresso_meta['meta_diaria']:.2f}")
+                
+                # Barra de progresso
+                col1, col2, col3 = st.columns(3)
+                
+                with col1:
+                    st.metric("💰 Ganho Hoje", f"R$ {progresso_meta['total_hoje']:.2f}")
+                
+                with col2:
+                    cor_progresso = "normal" if progresso_meta['progresso'] < 100 else "inverse"
+                    st.metric("📈 Progresso", f"{progresso_meta['progresso']:.1f}%")
+                
+                with col3:
+                    if progresso_meta['atingida']:
+                        st.metric("🎉 Status", "Meta Atingida!", delta="Parabéns!")
+                    else:
+                        st.metric("🎯 Falta", f"R$ {progresso_meta['falta']:.2f}")
+                
+                # Barra de progresso visual
+                progress_value = min(progresso_meta['progresso'] / 100, 1.0)
+                st.progress(progress_value)
+                
+                if progresso_meta['atingida']:
+                    st.success("🎉 Parabéns! Você atingiu sua meta diária!")
+                    st.balloons()
 
     # --- Formulário para adicionar novo rendimento ---
     with st.form("form_rendimento_adicionar"):
@@ -292,8 +405,27 @@ def tela_principal():
                 resumo_dia_mes = resumo_dia[resumo_dia["Mês"] == mes_selecionado]
 
                 st.subheader(f"📆 Resumo Diário de {mes_selecionado}")
-                st.dataframe(resumo_dia_mes.drop(columns=["Mês"]).style.format({"Total (R$)": "R$ {:.2f}"}), use_container_width=True)
+                
+                # Adicionar indicador de meta no resumo diário
+                if nova_meta > 0:
+                    resumo_dia_mes = resumo_dia_mes.copy()
+                    resumo_dia_mes["Meta Atingida"] = resumo_dia_mes["Total (R$)"] >= nova_meta
+                    resumo_dia_mes["% da Meta"] = (resumo_dia_mes["Total (R$)"] / nova_meta * 100).round(1)
+                    
+                    st.dataframe(
+                        resumo_dia_mes.drop(columns=["Mês"]).style.format({
+                            "Total (R$)": "R$ {:.2f}",
+                            "% da Meta": "{:.1f}%"
+                        }).applymap(
+                            lambda x: 'color: green' if x == True else 'color: red' if x == False else '',
+                            subset=["Meta Atingida"]
+                        ),
+                        use_container_width=True
+                    )
+                else:
+                    st.dataframe(resumo_dia_mes.drop(columns=["Mês"]).style.format({"Total (R$)": "R$ {:.2f}"}), use_container_width=True)
 
+                # Gráfico diário com linha de meta
                 fig_dia_mes = px.line(
                     resumo_dia_mes,
                     x="Data",
@@ -302,6 +434,16 @@ def tela_principal():
                     labels={"Data": "Data", "Total (R$)": "Total (R$)"}
                 )
                 fig_dia_mes.update_traces(mode="lines+markers")
+                
+                # Adicionar linha de meta se definida
+                if nova_meta > 0:
+                    fig_dia_mes.add_hline(
+                        y=nova_meta,
+                        line_dash="dash",
+                        line_color="red",
+                        annotation_text=f"Meta Diária: R$ {nova_meta:.2f}"
+                    )
+                
                 fig_dia_mes.update_layout(yaxis_title="Total (R$)", xaxis_title="Data", xaxis_tickformat="%d/%m/%Y")
                 st.plotly_chart(fig_dia_mes, use_container_width=True)
 

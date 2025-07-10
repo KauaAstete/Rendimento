@@ -196,7 +196,6 @@ def tela_login():
             nome_completo = st.text_input("Nome completo")
             senha_nova = st.text_input("Senha", type="password")
             confirmar_senha = st.text_input("Confirmar senha", type="password")
-            meta_inicial = st.number_input("Meta diária inicial (R$)", min_value=0.0, value=0.0, format="%.2f")
             botao_cadastro = st.form_submit_button("Criar conta")
             
             if botao_cadastro:

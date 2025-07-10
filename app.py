@@ -60,6 +60,11 @@ def carregar_dados():
         df = pd.read_csv(ARQUIVO_DADOS, parse_dates=["Data"])
         if "Data" not in df.columns or "Valor" not in df.columns:
             return pd.DataFrame(columns=["Data", "Valor", "Usuario"])
+        
+        # Verificar se a coluna Usuario existe, se não, criar com valor padrão
+        if "Usuario" not in df.columns:
+            df["Usuario"] = "usuario_antigo"  # Atribuir dados antigos a um usuário padrão
+        
         return df
     except Exception:
         return pd.DataFrame(columns=["Data", "Valor", "Usuario"])
@@ -221,7 +226,13 @@ else:
     data_hoje = date.today()
     df_usuario = carregar_dados()
     if not df_usuario.empty:
-        df_usuario = df_usuario[df_usuario['Usuario'] == st.session_state.usuario_logado]
+        # Verificar se a coluna Usuario existe antes de filtrar
+        if 'Usuario' in df_usuario.columns:
+            df_usuario = df_usuario[df_usuario['Usuario'] == st.session_state.usuario_logado]
+        else:
+            # Se não existe coluna Usuario, assumir que todos os dados são do usuário atual
+            df_usuario["Usuario"] = st.session_state.usuario_logado
+        
         df_usuario["Data"] = pd.to_datetime(df_usuario["Data"], errors="coerce")
         df_usuario = df_usuario.dropna(subset=["Data"])
     
@@ -284,7 +295,13 @@ else:
     # --- Carregamento dos dados do usuário ---
     df = carregar_dados()
     if not df.empty:
-        df = df[df['Usuario'] == st.session_state.usuario_logado]
+        # Verificar se a coluna Usuario existe antes de filtrar
+        if 'Usuario' in df.columns:
+            df = df[df['Usuario'] == st.session_state.usuario_logado]
+        else:
+            # Se não existe coluna Usuario, assumir que todos os dados são do usuário atual
+            df["Usuario"] = st.session_state.usuario_logado
+        
         df["Data"] = pd.to_datetime(df["Data"], errors="coerce")
         df = df.dropna(subset=["Data"])
         df = df.sort_values("Data").reset_index(drop=True)
@@ -319,7 +336,14 @@ else:
                 # Manter dados de outros usuários
                 df_outros = carregar_dados()
                 if not df_outros.empty:
-                    df_outros = df_outros[df_outros['Usuario'] != st.session_state.usuario_logado]
+                    # Verificar se existe coluna Usuario nos dados carregados
+                    if 'Usuario' in df_outros.columns:
+                        df_outros = df_outros[df_outros['Usuario'] != st.session_state.usuario_logado]
+                    else:
+                        # Se não existe coluna Usuario, criar para compatibilidade
+                        df_outros["Usuario"] = "usuario_antigo"
+                        df_outros = df_outros[df_outros['Usuario'] != st.session_state.usuario_logado]
+                    
                     df_salvo = pd.concat([df_outros, df_salvo], ignore_index=True)
                 
                 df_salvo["Data"] = pd.to_datetime(df_salvo["Data"], errors="coerce")
@@ -341,7 +365,14 @@ else:
                     # Manter dados de outros usuários
                     df_outros = carregar_dados()
                     if not df_outros.empty:
-                        df_outros = df_outros[df_outros['Usuario'] != st.session_state.usuario_logado]
+                        # Verificar se existe coluna Usuario nos dados carregados
+                        if 'Usuario' in df_outros.columns:
+                            df_outros = df_outros[df_outros['Usuario'] != st.session_state.usuario_logado]
+                        else:
+                            # Se não existe coluna Usuario, criar para compatibilidade
+                            df_outros["Usuario"] = "usuario_antigo"
+                            df_outros = df_outros[df_outros['Usuario'] != st.session_state.usuario_logado]
+                        
                         if not df_restante.empty:
                             df_final = pd.concat([df_outros, df_restante], ignore_index=True)
                         else:
